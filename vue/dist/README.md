@@ -1,124 +1,54 @@
-## Explanation of Build Files
+# vue
 
-| | UMD | CommonJS | ES Module |
-| --- | --- | --- | --- |
-| **Full** | vue.js | vue.common.js | vue.esm.js |
-| **Runtime-only** | vue.runtime.js | vue.runtime.common.js | vue.runtime.esm.js |
-| **Full (production)** | vue.min.js | | |
-| **Runtime-only (production)** | vue.runtime.min.js | | |
+## Which dist file to use?
 
-### Terms
+### From CDN or without a Bundler
 
-- **Full**: builds that contains both the compiler and the runtime.
+- **`vue(.runtime).global(.prod).js`**:
+    - For direct use via `<script src="...">` in the browser. Exposes the `Vue` global.
+    - Note that global builds are not [UMD](https://github.com/umdjs/umd) builds.  They are built as [IIFEs](https://developer.mozilla.org/en-US/docs/Glossary/IIFE) and is only meant for direct use via `<script src="...">`.
+    - In-browser template compilation:
+        - **`vue.global.js`** is the "full" build that includes both the compiler and the runtime so it supports compiling templates on the fly.
+        - **`vue.runtime.global.js`** contains only the runtime and requires templates to be pre-compiled during a build step.
+    - Inlines all Vue core internal packages - i.e. it's a single file with no dependencies on other files. This means you **must** import everything from this file and this file only to ensure you are getting the same instance of code.
+    - Contains hard-coded prod/dev branches, and the prod build is pre-minified. Use the `*.prod.js` files for production.
 
-- **Compiler**: code that is responsible for compiling template strings into JavaScript render functions.
+- **`vue(.runtime).esm-browser(.prod).js`**:
+    - For usage via native ES modules imports (in browser via `<script type="module">`.
+    - Shares the same runtime compilation, dependency inlining and hard-coded prod/dev behavior with the global build.
 
-- **Runtime**: code that is responsible for creating Vue instances, rendering and patching virtual DOM, etc. Basically everything minus the compiler.
+### With a Bundler
 
-- **[UMD](https://github.com/umdjs/umd)**: UMD builds can be used directly in the browser via a `<script>` tag. The default file from Unpkg CDN at [https://unpkg.com/vue](https://unpkg.com/vue) is the Runtime + Compiler UMD build (`vue.js`).
+- **`vue(.runtime).esm-bundler.js`**:
 
-- **[CommonJS](http://wiki.commonjs.org/wiki/Modules/1.1)**: CommonJS builds are intended for use with older bundlers like [browserify](http://browserify.org/) or [webpack 1](https://webpack.github.io). The default file for these bundlers (`pkg.main`) is the Runtime only CommonJS build (`vue.runtime.common.js`).
+    - For use with bundlers like `webpack`, `rollup` and `parcel`.
+    - Leaves prod/dev branches with `process.env.NODE_ENV` guards (must be replaced by bundler)
+    - Does not ship minified builds (to be done together with the rest of the code after bundling)
+    - Imports dependencies (e.g. `@vue/runtime-core`, `@vue/runtime-compiler`)
+        - Imported dependencies are also `esm-bundler` builds and will in turn import their dependencies (e.g. `@vue/runtime-core` imports `@vue/reactivity`)
+        - This means you **can** install/import these deps individually without ending up with different instances of these dependencies, but you must make sure they all resolve to the same version.
+    - In-browser template compilation:
+        - **`vue.runtime.esm-bundler.js` (default)** is runtime only, and requires all templates to be pre-compiled. This is the default entry for bundlers (via `module` field in `package.json`) because when using a bundler templates are typically pre-compiled (e.g. in `*.vue` files).
+        - **`vue.esm-bundler.js`**: includes the runtime compiler. Use this if you are using a bundler but still want runtime template compilation (e.g. in-DOM templates or templates via inline JavaScript strings). You will need to configure your bundler to alias `vue` to this file.
 
-- **[ES Module](http://exploringjs.com/es6/ch_modules.html)**: ES module builds are intended for use with modern bundlers like [webpack 2](https://webpack.js.org) or [rollup](http://rollupjs.org/). The default file for these bundlers (`pkg.module`) is the Runtime only ES Module build (`vue.runtime.esm.js`).
+#### Bundler Build Feature Flags
 
-### Runtime + Compiler vs. Runtime-only
+Starting with 3.0.0-rc.3, `esm-bundler` builds now exposes global feature flags that can be overwritten at compile time:
 
-If you need to compile templates on the fly (e.g. passing a string to the `template` option, or mounting to an element using its in-DOM HTML as the template), you will need the compiler and thus the full build.
+- `__VUE_OPTIONS_API__` (enable/disable Options API support, default: `true`)
+- `__VUE_PROD_DEVTOOLS__` (enable/disable devtools support in production, default: `false`)
 
-When using `vue-loader` or `vueify`, templates inside `*.vue` files are compiled into JavaScript at build time. You don't really need the compiler in the final bundle, and can therefore, use the runtime-only build.
+The build will work without configuring these flags, however it is **strongly recommended** to properly configure them in order to get proper tree-shaking in the final bundle. To configure these flags:
 
-Since the runtime-only builds are roughly 30% lighter-weight than their full-build counterparts, you should use it whenever you can. If you wish to use the full build instead, you need to configure an alias in your bundler.
+- webpack: use [DefinePlugin](https://webpack.js.org/plugins/define-plugin/)
+- Rollup: use [@rollup/plugin-replace](https://github.com/rollup/plugins/tree/master/packages/replace)
+- Vite: configured by default, but can be overwritten using the [`define` option](https://github.com/vitejs/vite/blob/a4133c073e640b17276b2de6e91a6857bdf382e1/src/node/config.ts#L72-L76)
 
-#### Webpack
+Note: the replacement value **must be boolean literals** and cannot be strings, otherwise the bundler/minifier will not be able to properly evaluate the conditions.
 
-``` js
-module.exports = {
-  // ...
-  resolve: {
-    alias: {
-      'vue$': 'vue/dist/vue.esm.js' // 'vue/dist/vue.common.js' for webpack 1
-    }
-  }
-}
-```
+### For Server-Side Rendering
 
-#### Rollup
-
-``` js
-const alias = require('rollup-plugin-alias')
-
-rollup({
-  // ...
-  plugins: [
-    alias({
-      'vue': 'vue/dist/vue.esm.js'
-    })
-  ]
-})
-```
-
-#### Browserify
-
-Add to your project's `package.json`:
-
-``` js
-{
-  // ...
-  "browser": {
-    "vue": "vue/dist/vue.common.js"
-  }
-}
-```
-
-### Development vs. Production Mode
-
-Development/production modes are hard-coded for the UMD builds: the un-minified files are for development, and the minified files are for production.
-
-CommonJS and ES Module builds are intended for bundlers, therefore we don't provide minified versions for them. You will be responsible for minifying the final bundle yourself.
-
-CommonJS and ES Module builds also preserve raw checks for `process.env.NODE_ENV` to determine the mode they should run in. You should use appropriate bundler configurations to replace these environment variables in order to control which mode Vue will run in. Replacing `process.env.NODE_ENV` with string literals also allows minifiers like UglifyJS to completely drop the development-only code blocks, reducing final file size.
-
-#### Webpack
-
-Use Webpack's [DefinePlugin](https://webpack.js.org/plugins/define-plugin/):
-
-``` js
-var webpack = require('webpack')
-
-module.exports = {
-  // ...
-  plugins: [
-    // ...
-    new webpack.DefinePlugin({
-      'process.env': {
-        NODE_ENV: JSON.stringify('production')
-      }
-    })
-  ]
-}
-```
-
-#### Rollup
-
-Use [rollup-plugin-replace](https://github.com/rollup/rollup-plugin-replace):
-
-``` js
-const replace = require('rollup-plugin-replace')
-
-rollup({
-  // ...
-  plugins: [
-    replace({
-      'process.env.NODE_ENV': JSON.stringify('production')
-    })
-  ]
-}).then(...)
-```
-
-#### Browserify
-
-Apply a global [envify](https://github.com/hughsk/envify) transform to your bundle.
-
-``` bash
-NODE_ENV=production browserify -g envify -e main.js | uglifyjs -c -m > build.js
-```
+- **`vue.cjs(.prod).js`**:
+    - For use in Node.js server-side rendering via `require()`.
+    - If you bundle your app with webpack with `target: 'node'` and properly externalize `vue`, this is the build that will be loaded.
+    - The dev/prod files are pre-built, but the appropriate file is automatically required based on `process.env.NODE_ENV`.
